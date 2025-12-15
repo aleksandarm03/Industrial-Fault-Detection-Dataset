@@ -1,16 +1,15 @@
 
-dataset=read.csv("./dataset/Industrial_fault_detection.csv",stringsAsFactors = F)
-head(dataset)
-summary(dataset)
-str(dataset)
+dataset=read.csv("./dataset/Industrial_fault_detection.csv"
+                 ,stringsAsFactors = F)
 
 
-#FAZA 1
-
-#DEFINISANJE PROBLEMA
-
-
-#FAZA 2
+library(tidyverse)
+library(ggplot2)
+library(reshape2)
+library(dplyr)
+library(readr)
+library(scales)
+options(encoding = "UTF-8")
 
 #Provera početnih redova dataseta
 head(dataset)
@@ -20,7 +19,6 @@ str(dataset)
 
 #Pregled medijane, gornjeg i donjeg kvantila i min i max vrednosti
 summary(dataset)
-
 #Pregled krajnjih redova dataseta, iz kojih možemo uočiti nedostatak vrednosti (većina/sve kolone popunjene su nulama),
 #ali, međutim, ti redovi su sasvim validni, jer i dalje poseduju vrednosti očitavanja (temperatura, pritisak i sl.) iako senzori nemaju nikakve vrednosti
 tail(dataset)
@@ -30,6 +28,7 @@ dim(dataset)
 
 #Primećujemo da nema duplikata merenja, tako da ne brišemo nijedan od redova
 sum(duplicated(dataset))
+
 
 #Uočavamo da dataset nema potpuno praznih kolona, što znači da zasada smatramo da su svi redovi validni unosi
 zero_rows <- which(rowSums(dataset == 0) == ncol(dataset))
@@ -49,6 +48,24 @@ summary(dataset[, c(
 
 #Vrednosti sve normalne... u normalnim rasponima napisati zašto?
 
+library(ggplot2)
+library(reshape2)
+library(dplyr)
+
+# osnovni senzori
+base_sensors <- c("Temperature","Vibration","Pressure",
+                  "Flow_Rate","Current","Voltage")
+library(ggplot2)
+library(patchwork)
+
+plots <- lapply(base_sensors, function(v) {
+  ggplot(dataset, aes_string(x = v)) +
+    geom_histogram(color = "black", fill = "lightblue", bins = 30) +
+    labs(title = paste("Histogram of", v), x = v, y = "Frequency")
+})
+
+wrap_plots(plots, ncol = 2)
+
 
 #Pregled FFT kolonam, odnosno vrednosti sa senzora
 fft_cols <- grep("FFT", names(dataset), value = TRUE)
@@ -60,6 +77,20 @@ summary(dataset[, fft_cols])
 
 #Proveravamo koje vrste neispravnosti su najviše zastupljene
 table(dataset$Fault_Type)
+
+freq <- as.data.frame(table(dataset$Fault_Type))
+freq$perc <- round(freq$Freq / sum(freq$Freq) * 100, 1)
+
+ggplot(freq, aes(x = Var1, y = Freq)) +
+  geom_col(fill = "darkorange") +
+  geom_text(aes(label = paste0(perc, "%")),
+            vjust = -0.3, size = 4) +
+  labs(title = "Učestalost klasa (u procentima)",
+       x = "Fault_Type",
+       y = "Broj posmatranja") +
+  ylim(0, max(freq$Freq) * 1.15) +
+  theme_minimal()
+
 
 #evidentno je da su uređaji bez kvarova najdominantniji, ali to takođe ukazuje na veliki disblanas u samim podacima (gotovo xx% ulaza nema kvar)
 prop.table(table(dataset$Fault_Type))
@@ -157,8 +188,11 @@ boxplot(Vibration ~ Fault_Type, data=dataset, col="lightgreen")
 
 #Pretvaranje tipa kvara u faktor promenljive
 
-dataset$Fault_Type <- as.factor(dataset$Fault_Type)
+dataset$Fault_Type <- factor(
+  dataset$Fault_Type,
+  levels = c("0", "1", "2", "3"),
+  labels = c("Normal", "Overheating", "Leakage", "Power_Fluctuation")
+)
 
-dataset$Fault_Type
 
 
