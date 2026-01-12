@@ -1,0 +1,32 @@
+================================================================================ 
+IZVEŠTAJ O EVALUACIJI MODELA
+================================================================================ 
+
+Datum: 2026-01-12
+Broj feature-a: 42
+Broj klasa: 4
+
+--- Random Forest ---
+Accuracy: 0.6633
+Balanced Accuracy: 0.4945
+Macro-F1: 0.4309
+Multi-class AUC: 0.5466
+
+--- Multinomijalna logistička regresija ---
+Accuracy: 0.4523
+Balanced Accuracy: 0.5107
+Macro-F1: 0.4017
+Multi-class AUC: 0.5307
+
+--- Top 10 atributa (Random Forest) ---
+              Feature Importance
+FFT_Pres_1 FFT_Pres_1 0.04219181
+FFT_Pres_9 FFT_Pres_9 0.04194609
+FFT_Vib_5   FFT_Vib_5 0.03048520
+FFT_Vib_7   FFT_Vib_7 0.02725476
+FFT_Vib_3   FFT_Vib_3 0.02724614
+FFT_Temp_1 FFT_Temp_1 0.02719524
+FFT_Temp_5 FFT_Temp_5 0.02501168
+FFT_Temp_3 FFT_Temp_3 0.02285078
+FFT_Temp_9 FFT_Temp_9 0.02282956
+FFT_Temp_7 FFT_Temp_7 0.02162576
