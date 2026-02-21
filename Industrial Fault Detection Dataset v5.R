@@ -1,0 +1,812 @@
+# ============================================================================
+# INDUSTRIAL FAULT DETECTION - Poboljšana verzija
+# ============================================================================
+# Ovaj skript implementira kompletan ML pipeline za detekciju industrijskih
+# kvarova koristeći različite algoritme mašinskog učenja.
+# ============================================================================
+setwd("C:/Users/Djole/Desktop/IV-Godina/UUNOP/Industrial-Fault-Detection-Dataset")
+# ----------------------------------------------------------------------------
+# SEKCIJA 1: UČITAVANJE BIBLIOTEKA
+# ----------------------------------------------------------------------------
+# Uklanjanje duplikata i učitavanje samo potrebnih biblioteka
+library(tidyverse)      # Uključuje dplyr, ggplot2, readr, itd.
+library(caret)          # Za treniranje i evaluaciju modela
+library(randomForest)   # Za Random Forest algoritam
+library(pROC)           # Za ROC i AUC metrike
+library(nnet)           # Za multinomijalnu logističku regresiju
+library(patchwork)      # Za kombinovanje ggplot grafikona
+library(recipes)        # Za definisanje preprocessing pipeline-a (recipe) nad podacima
+library(themis)         # Za balansiranje klasa (SMOTE i druge metode za nebalansirane skupove)
+
+# Postavljanje opcija
+options(encoding = "UTF-8")
+
+# {Novo} Metoda za generisanje tema za plotove, podešava margine, ugao teksta, veličinu naslova i sl.
+theme_grid_readable <- function() {
+  theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+      axis.text.y = element_text(size = 8),
+      axis.title  = element_text(size = 11),
+      plot.title  = element_text(size = 11, face = "bold"),
+      strip.text  = element_text(size = 10),
+      plot.margin = ggplot2::margin(8, 12, 8, 8, unit = "pt")
+    )
+}
+
+# {Novo} Metoda za cuvanje svih plotova u fajlovima u direktorijumu results/plots
+
+save_and_print <- function(p, filename, w = 14, h = 8, dpi = 300) {
+  if (!dir.exists("results")) dir.create("results")
+  if (!dir.exists("results/plots")) dir.create("results/plots", recursive = TRUE)
+  
+  print(p)
+  
+  ggplot2::ggsave(
+    filename = file.path("results/plots", filename),
+    plot = p,
+    width = w, height = h,
+    dpi = dpi
+  )
+}
+
+
+# ----------------------------------------------------------------------------
+# SEKCIJA 2: UČITAVANJE PODATAKA
+# ----------------------------------------------------------------------------
+cat(paste0(rep("=", 80), collapse = ""), "\n")
+cat("UČITAVANJE PODATAKA\n")
+cat(paste0(rep("=", 80), collapse = ""), "\n")
+
+dataset_path <- "./dataset/Industrial_fault_detection.csv"
+dataset <- read.csv(dataset_path, stringsAsFactors = FALSE)
+
+cat(sprintf("Dataset uspešno učitan: %d redova, %d kolona\n",
+            nrow(dataset), ncol(dataset)))
+
+
+summary(dataset)
+# ----------------------------------------------------------------------------
+# SEKCIJA 3: EKSPLORATIVNA ANALIZA PODATAKA (EDA)
+# ----------------------------------------------------------------------------
+cat("\n", paste0(rep("=", 80), collapse = ""), "\n")
+cat("EKSPLORATIVNA ANALIZA PODATAKA\n")
+cat(paste0(rep("=", 80), collapse = ""), "\n")
+
+# 3.1 Osnovne informacije o datasetu
+cat("\n--- Osnovne informacije ---\n")
+cat(sprintf("Dimenzije: %d x %d\n", nrow(dataset), ncol(dataset)))
+cat(sprintf("Duplikati: %d\n", sum(duplicated(dataset))))
+cat(sprintf("Nedostajuće vrednosti: %d\n", sum(is.na(dataset))))
+
+# Provera potpuno praznih redova
+num_df <- dataset %>% select(where(is.numeric))
+zero_rows <- which(rowSums(num_df == 0, na.rm = TRUE) == ncol(num_df))
+cat(sprintf("Potpuno prazni redovi: %d\n", length(zero_rows)))
+
+# Osnovna struktura i rečnik podataka
+cat("\n--- Struktura (tipovi kolona) ---\n")
+print(str(dataset))
+
+cat("\n--- Tipovi kolona ---\n")
+print(sapply(dataset, class))
+
+# Definicija osnovnih senzora
+base_sensors <- c("Temperature", "Vibration", "Pressure",
+                  "Flow_Rate", "Current", "Voltage")
+
+cat("\n--- Summary osnovnih senzora ---\n")
+print(summary(dataset %>% select(all_of(base_sensors))))
+
+
+# 3.2 Analiza ciljne varijable (Fault_Type)
+cat("\n--- Analiza Fault_Type ---\n")
+
+# Pretvaranje u faktor pre analize za bolje labele
+dataset$Fault_Type <- factor(
+  dataset$Fault_Type,
+  levels = c("0", "1", "2", "3"),
+  labels = c("Normal", "Overheating", "Leakage", "Power_Fluctuation")
+)
+
+fault_table <- table(dataset$Fault_Type)
+fault_prop <- prop.table(fault_table)
+print(fault_table)
+print(round(fault_prop * 100, 2))
+
+# Vizuelizacija distribucije klasa
+freq_df <- data.frame(
+  Fault_Type = names(fault_table),
+  Freq = as.numeric(fault_table),
+  Perc = round(as.numeric(fault_prop) * 100, 1)
+)
+
+plot_distribution <- ggplot(freq_df, aes(x = Fault_Type, y = Freq, fill = Fault_Type)) +
+  geom_col() +
+  geom_text(aes(label = paste0(Perc, "%")), vjust = -0.3, size = 4) +
+  labs(title = "Distribucija klasa (u procentima)",
+       x = "Tip kvara",
+       y = "Broj posmatranja") +
+  ylim(0, max(freq_df$Freq) * 1.15) +
+  theme_grid_readable()
+save_and_print(plot_distribution, "DistribucijaKlasa.png", 16, 10)
+
+# 3.3 Histogrami osnovnih senzora
+cat("\n--- Generisanje histograma osnovnih senzora ---\n")
+sensor_plots <- lapply(base_sensors, function(var) {
+  ggplot(dataset, aes_string(x = var)) +
+    geom_histogram(color = "black", fill = "lightblue", bins = 30, alpha = 0.7) +
+    labs(title = paste("Histogram:", var), x = var, y = "Frekvencija") +
+    theme_grid_readable() +
+    theme(legend.position = "none")
+})
+combined_histograms <- wrap_plots(sensor_plots, ncol = 2)
+save_and_print(combined_histograms, "HistogramiOsnovnihSenzora.png", 16, 10)
+
+# 3.4 Boxplotovi senzora u odnosu na Fault_Type
+cat("\n--- Generisanje boxplotova u odnosu na Fault_Type ---\n")
+boxplot_plots <- lapply(base_sensors, function(var) {
+  ggplot(dataset, aes_string(x = "Fault_Type", y = var, fill = "Fault_Type")) +
+    geom_boxplot(alpha = 0.7) +
+    labs(title = paste(var, "po tipu kvara"), x = "Tip kvara", y = var) +
+    theme_grid_readable() + theme(legend.position = "none")
+})
+combined_boxplots <- wrap_plots(boxplot_plots, ncol = 2)
+save_and_print(combined_boxplots, "BoxPlotoviUOdnosuNaFaultType.png", 16, 10)
+# 3.5 Deskriptivna statistika po klasama – pregledno po senzorima
+cat("\n--- Deskriptivna statistika senzora po tipu kvara ---\n")
+
+for (sensor in base_sensors) {
+  
+  cat("\nSENZOR:", sensor, "\n")
+  
+  sensor_stats <- dataset %>%
+    group_by(Fault_Type) %>%
+    summarise(
+      Mean = mean(.data[[sensor]]),
+      SD   = sd(.data[[sensor]]),
+      Min  = min(.data[[sensor]]),
+      Q25  = quantile(.data[[sensor]], 0.25),
+      Med  = median(.data[[sensor]]),
+      Q75  = quantile(.data[[sensor]], 0.75),
+      Max  = max(.data[[sensor]])
+    )
+  
+  print(sensor_stats)
+}
+
+# 3.6 Korelacija osnovnih senzora
+cat("\n--- Korelacija osnovnih senzora ---\n")
+
+cor_base <- cor(dataset %>% select(all_of(base_sensors)))
+print(round(cor_base, 3))
+
+cat("\n--- Heatmap korelacije (osnovni senzori) ---\n")
+
+cor_df <- as.data.frame(as.table(cor_base))
+colnames(cor_df) <- c("Var1", "Var2", "Cor")
+
+plot_cor <- ggplot(cor_df, aes(x = Var1, y = Var2, fill = Cor)) +
+  geom_tile() +
+  geom_text(aes(label = sprintf("%.2f", Cor)), size = 3) +
+  theme_grid_readable()
+
+save_and_print(plot_cor, "HeatmapKorelacije.png", 16, 10)
+
+# {Novo} Zaključak iz korelacije (osnovni senzori)
+cat("\n--- {Novo} Zaključak: korelacije osnovnih senzora ---\n")
+
+tmp_cor <- cor_base
+tmp_cor[lower.tri(tmp_cor, diag = TRUE)] <- NA
+
+top_pairs <- as.data.frame(as.table(tmp_cor)) %>%
+  drop_na() %>%
+  transmute(
+    Varijabla_1 = Var1,
+    Varijabla_2 = Var2,
+    Korelacija = round(Freq, 3),
+    AbsKorelacija = round(abs(Freq), 3)
+  ) %>%
+  arrange(desc(AbsKorelacija)) %>%
+  head(5)
+
+cat("Najizraženiji parovi (top 5 po korelaciji, bez dijagonale):\n")
+print(top_pairs)
+
+max_abs <- top_pairs$AbsKorelacija[1]
+cat(sprintf("- Najveća apsolutna korelacija među osnovnim senzorima je %.3f.\n", max_abs))
+
+# 3.7 Provera fizički nelogičnih vrednosti
+cat("\n--- Provera fizički nelogičnih vrednosti ---\n")
+invalid_temp <- which(dataset$Temperature <= 0)
+invalid_pressure <- which(dataset$Pressure <= 0)
+invalid_voltage <- which(dataset$Voltage <= 0)
+invalid_flow <- which(dataset$Flow_Rate < 0)
+invalid_current <- which(dataset$Current < 0)
+
+invalid_rows <- unique(c(invalid_temp, invalid_pressure, invalid_voltage,
+                         invalid_flow, invalid_current))
+cat(sprintf("Redovi sa nelogičnim vrednostima: %d\n", length(invalid_rows)))
+
+# {Novo} 3.8 Analiza FFT kolona (Temp/Vib/Pres) - uredno po senzorima i binovima
+fft_cols <- grep("^FFT_", names(dataset), value = TRUE)
+cat(sprintf("\nBroj FFT kolona: %d\n", length(fft_cols)))
+cat("\nPrimer FFT kolona:\n")
+print(head(fft_cols, 10))
+
+# Parsiranje naziva kolona: FFT_Temp_0 -> Sensor=Temp, Bin=0
+fft_meta <- tibble(FFT_Col = fft_cols) %>%
+  tidyr::extract(
+    FFT_Col,
+    into = c("FFT_Sensor", "Bin"),
+    regex = "^FFT_([A-Za-z]+)_([0-9]+)$",
+    remove = FALSE
+  ) %>%
+  mutate(
+    Bin = as.integer(Bin),
+    FFT_Sensor = recode(FFT_Sensor,
+                        Temp = "Temperature",
+                        Vib  = "Vibration",
+                        Pres = "Pressure"
+    )
+  )
+
+# Long format
+fft_long <- dataset %>%
+  select(Fault_Type, all_of(fft_cols)) %>%
+  pivot_longer(cols = all_of(fft_cols), names_to = "FFT_Col", values_to = "Value") %>%
+  left_join(fft_meta, by = "FFT_Col")
+
+# Prosečne vrednosti po klasi, senzoru i binu
+fft_mean <- fft_long %>%
+  group_by(Fault_Type, FFT_Sensor, Bin) %>%
+  summarise(MeanValue = mean(Value), .groups = "drop")
+
+# Plot: 3 panela (po senzoru), X = bin (0..9)
+plot_fft_mean <- ggplot(fft_mean, aes(x = Bin, y = MeanValue, color = Fault_Type, group = Fault_Type)) +
+  geom_line() +
+  geom_point(size = 1) +
+  facet_wrap(~ FFT_Sensor, scales = "free_y") +
+  labs(
+    title = "FFT karakteristike po senzorima i klasama",
+    x = "FFT bin (indeks)",
+    y = "Prosečna vrednost"
+  ) +
+  theme_grid_readable() +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+
+save_and_print(plot_fft_mean, "FFT_po_senzorima.png", 16, 8)
+
+
+# {Novo}Rangiranje FFT kolona po razlici između klasa (ANOVA F-stat)
+
+anova_fstat <- function(colname) {
+  x <- dataset[[colname]]
+  if (sd(x, na.rm = TRUE) == 0) return(NA_real_)
+  fit <- aov(x ~ dataset$Fault_Type)
+  s <- summary(fit)[[1]]
+  as.numeric(s[["F value"]][1])
+}
+
+fft_fstats <- data.frame(
+  FFT_Col = fft_cols,
+  F_value = sapply(fft_cols, anova_fstat)
+)
+
+fft_fstats <- fft_fstats[!is.na(fft_fstats$F_value), ]
+fft_fstats <- fft_fstats[order(-fft_fstats$F_value), ]
+
+write.csv(fft_fstats, "results/FFT_ANOVA_rangiranje.csv", row.names = FALSE)
+
+top_fft <- head(fft_fstats, 15)
+
+plot_fft_anova <- ggplot(top_fft, aes(x = reorder(FFT_Col, F_value), y = F_value)) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Top 15 FFT kolona po ANOVA F-stat",
+    x = "FFT kolona",
+    y = "F-stat"
+  ) +
+  theme_grid_readable()
+
+save_and_print(plot_fft_anova, "FFT_Top15_ANOVA.png", 14, 8)
+
+# ----------------------------------------------------------------------------
+# SEKCIJA 4: PREPROCESIRANJE PODATAKA
+# ----------------------------------------------------------------------------
+cat("\n", paste0(rep("=", 80), collapse = ""), "\n")
+cat("PREPROCESIRANJE PODATAKA\n")
+cat(paste0(rep("=", 80), collapse = ""), "\n")
+
+# 4.1 Verifikacija Fault_Type faktora
+cat("\n--- Verifikacija Fault_Type faktora ---\n")
+cat("Fault_Type je faktor sa labelima:\n")
+print(levels(dataset$Fault_Type))
+
+# 4.2 Kreiranje novih feature-a (feature engineering)
+cat("\n--- Kreiranje novih feature-a ---\n")
+dataset <- dataset %>%
+  mutate(
+    # Prosečna vrednost svih osnovnih senzora
+    Avg_Sensor = rowMeans(select(., all_of(base_sensors)), na.rm = TRUE),
+    
+    # Odnos protoka i pritiska (korisno za detekciju Leakage)
+    Ratio_Flow_Pressure = Flow_Rate / (Pressure + 1e-10),  # Dodajemo malu vrednost da izbegnemo deljenje sa 0
+    
+    # Odnos struje i napona (korisno za detekciju Power Fluctuation)
+    Ratio_Current_Voltage = Current / (Voltage + 1e-10),
+    
+    # Standardna devijacija osnovnih senzora (pokazuje varijabilnost)
+    SD_Sensor = apply(select(., all_of(base_sensors)), 1, sd, na.rm = TRUE),
+    
+    # Maksimalna vrednost osnovnih senzora
+    Max_Sensor = apply(select(., all_of(base_sensors)), 1, max, na.rm = TRUE),
+    
+    # Minimalna vrednost osnovnih senzora
+    Min_Sensor = apply(select(., all_of(base_sensors)), 1, min, na.rm = TRUE)
+  )
+cat("Dodato 6 novih feature-a\n")
+
+# 4.3 Uklanjanje nedostajućih vrednosti (iako ih nema)
+cat("\n--- Obrada nedostajućih vrednosti ---\n")
+rows_before <- nrow(dataset)
+dataset <- na.omit(dataset)
+rows_after <- nrow(dataset)
+cat(sprintf("Redova pre: %d, posle: %d (uklonjeno: %d)\n",
+            rows_before, rows_after, rows_before - rows_after))
+
+# 4.4 Identifikacija numeričkih kolona (isključujući Fault_Type)
+feature_cols <- setdiff(names(dataset), "Fault_Type")
+feature_cols <- feature_cols[sapply(dataset[feature_cols], is.numeric)]
+cat(sprintf("\nBroj numeričkih feature-a: %d\n", length(feature_cols)))
+
+# {Novo} Uklanjanje near-zero variance kolona (kolone bez informativne vrednosti)
+cat("\n--- Provera near-zero variance kolona ---\n")
+
+nzv_idx <- nearZeroVar(dataset[, feature_cols], saveMetrics = TRUE)
+nzv_cols <- rownames(nzv_idx)[nzv_idx$nzv]
+
+cat(sprintf("Near-zero variance kolone: %d\n", length(nzv_cols)))
+
+if (length(nzv_cols) > 0) {
+  print(nzv_cols)
+  feature_cols <- setdiff(feature_cols, nzv_cols)
+  cat(sprintf("Preostalo numeričkih feature-a: %d\n", length(feature_cols)))
+} else {
+  cat("Nema near-zero variance kolona.\n")
+}
+
+# 4.5 Podela na train i test PRE skaliranja (važno za pravilno skaliranje!)
+cat("\n--- Podela na train i test set ---\n")
+set.seed(123)
+trainIndex <- createDataPartition(dataset$Fault_Type, p = 0.8, list = FALSE)
+train_data_raw <- dataset[trainIndex, ]
+test_data_raw <- dataset[-trainIndex, ]
+
+cat(sprintf("Train set: %d redova (%.1f%%)\n",
+            nrow(train_data_raw), nrow(train_data_raw)/nrow(dataset)*100))
+
+
+#{Novo} Prikaz dimenzija trening i test skupa, kao i konacne kolone pre skaliranja
+cat("\n--- {Novo}Pregled DF u trenutku podele (pre skaliranja) ---\n")
+
+cat("\nKolone u dataset-u (ukupno): ", ncol(dataset), "\n", sep = "")
+
+cat("\nTrain: dimenzije = ", nrow(train_data_raw), " x ", ncol(train_data_raw), "\n", sep = "")
+cat("Test : dimenzije = ", nrow(test_data_raw), " x ", ncol(test_data_raw), "\n", sep = "")
+
+cat("\nKolone i njihovi tipovi (Train):\n")
+print(sapply(train_data_raw, class))
+
+cat(sprintf("Test set: %d redova (%.1f%%)\n",
+            nrow(test_data_raw), nrow(test_data_raw)/nrow(dataset)*100))
+
+# 4.6 Skaliranje numeričkih feature-a (samo na train setu, pa primena na test)
+cat("\n--- Skaliranje feature-a (centriranje i standardizacija) ---\n")
+cat("Napomena: Skaliranje (center/scale) je važno za modele osetljive na skalu (npr. logistička regresija, neuronske mreže); Random Forest nije osetljiv, ali koristimo isti preprocessing za sve modele.\n")
+
+preProc <- preProcess(train_data_raw[, feature_cols],
+                      method = c("center", "scale"))
+
+# Primena skaliranja
+train_data_scaled <- train_data_raw
+train_data_scaled[, feature_cols] <- predict(preProc, train_data_raw[, feature_cols])
+
+test_data_scaled <- test_data_raw
+test_data_scaled[, feature_cols] <- predict(preProc, test_data_raw[, feature_cols])
+
+cat("Skaliranje završeno\n")
+
+
+# {Novo} Feature selection – uklanjanje visoko korelisanih feature-a (train set)
+cat("\n--- {Novo} Feature selection: visoka korelacija ---\n")
+
+cor_train <- cor(train_data_scaled[, feature_cols], use = "pairwise.complete.obs")
+high_corr_idx <- findCorrelation(cor_train, cutoff = 0.95, names = FALSE)
+
+if (length(high_corr_idx) > 0) {
+  removed_cols <- feature_cols[high_corr_idx]
+  cat(sprintf("Uklonjeno feature-a zbog korelacije (cutoff=0.95): %d\n", length(removed_cols)))
+  feature_cols <- setdiff(feature_cols, removed_cols)
+  cat(sprintf("Preostalo feature-a posle selekcije: %d\n", length(feature_cols)))
+} else {
+  cat("Nema visoko korelisanih feature-a iznad cutoff-a.\n")
+}
+
+
+# 4.7 {Novo} Balansiranje klasa koristeći SMOTE (samo na train setu!)
+cat("\n--- Balansiranje klasa (SMOTE - themis) ---\n")
+cat("Distribucija klasa PRE balansiranja:\n")
+print(table(train_data_scaled$Fault_Type))
+
+# Selektujemo samo odabrane feature-e
+train_data_scaled_sel <- train_data_scaled[, c("Fault_Type", feature_cols)]
+
+set.seed(123)
+
+rec_smote <- recipe(Fault_Type ~ ., data = train_data_scaled_sel) %>%
+  step_smote(Fault_Type)
+
+prep_smote <- prep(rec_smote, training = train_data_scaled_sel)
+
+balanced_train <- bake(prep_smote, new_data = NULL)
+
+cat("\nDistribucija klasa POSLE balansiranja:\n")
+print(table(balanced_train$Fault_Type))
+
+
+# {Novo} Plot pre/posle SMOTE (dokaz balansiranja)
+df_pre <- as.data.frame(table(train_data_scaled$Fault_Type))
+colnames(df_pre) <- c("Fault_Type", "Count")
+df_pre$Stage <- "Pre_SMOTE"
+
+df_post <- as.data.frame(table(balanced_train$Fault_Type))
+colnames(df_post) <- c("Fault_Type", "Count")
+df_post$Stage <- "Post_SMOTE"
+
+df_compare <- rbind(df_pre, df_post)
+
+plot_smote <- ggplot(df_compare, aes(x = Fault_Type, y = Count, fill = Stage)) +
+  geom_col(position = "dodge") +
+  labs(
+    title = "Distribucija klasa pre i posle SMOTE",
+    x = "Tip kvara",
+    y = "Broj uzoraka"
+  ) +
+  theme_grid_readable()
+
+save_and_print(plot_smote, "SMOTE_Poredjenje.png", w = 12, h = 8, dpi = 300)
+
+write.csv(balanced_train, "results/train_balanced_smote.csv", row.names = FALSE)
+
+# Finalni train i test setovi
+train_data <- balanced_train
+test_data <- test_data_scaled
+
+# ----------------------------------------------------------------------------
+# SEKCIJA 5: IZGRADNJA I TRENIRANJE MODELA
+# ----------------------------------------------------------------------------
+cat("\n", paste0(rep("=", 80), collapse = ""), "\n")
+cat("IZGRADNJA I TRENIRANJE MODELA\n")
+cat(paste0(rep("=", 80), collapse = ""), "\n")
+
+# 5.1 Random Forest Model
+cat("\n--- Treniranje Random Forest modela ---\n")
+set.seed(123)
+rf_model <- randomForest(
+  Fault_Type ~ .,
+  data = train_data,
+  ntree = 200,           # Povećan broj stabala za bolju tačnost
+  mtry = floor(sqrt(ncol(train_data) - 1)),  # Optimalan mtry za klasifikaciju
+  importance = TRUE,
+  do.trace = 50
+)
+cat("Random Forest model treniran\n")
+
+# 5.2 Multinomijalna logistička regresija
+cat("\n--- Treniranje Multinomijalne logističke regresije ---\n")
+set.seed(123)
+log_model <- multinom(Fault_Type ~ ., data = train_data, trace = FALSE)
+cat("Multinomijalna logistička regresija trenirana\n")
+
+# 5.3 Neural Network (MLP) - caret + nnet
+cat("\n--- Treniranje Neural Network (MLP) modela ---\n")
+
+set.seed(123)
+
+ctrl_nn <- trainControl(
+  method = "repeatedcv",
+  number = 5,
+  repeats = 3,
+  classProbs = TRUE,
+  savePredictions = "final"
+)
+
+grid_nn <- expand.grid(
+  size = c(3, 5, 7),
+  decay = c(0, 0.001, 0.01)
+)
+
+nn_model <- train(
+  Fault_Type ~ .,
+  data = train_data,
+  method = "nnet",
+  trControl = ctrl_nn,
+  tuneGrid = grid_nn,
+  maxit = 500,
+  trace = FALSE
+)
+
+cat("Neural Network model treniran\n")
+print(nn_model$bestTune)
+
+# ----------------------------------------------------------------------------
+# SEKCIJA 6: EVALUACIJA MODELA
+# ----------------------------------------------------------------------------
+cat("\n", paste0(rep("=", 80), collapse = ""), "\n")
+cat("EVALUACIJA MODELA\n")
+cat(paste0(rep("=", 80), collapse = ""), "\n")
+
+# 6.1 Predikcije
+cat("\n--- Generisanje predikcija ---\n")
+rf_pred <- predict(rf_model, test_data)
+rf_prob <- predict(rf_model, test_data, type = "prob")
+
+log_pred <- predict(log_model, test_data)
+log_prob <- predict(log_model, test_data, type = "prob")
+
+nn_pred <- predict(nn_model, test_data)
+nn_prob <- predict(nn_model, test_data, type = "prob")
+
+# Usklađivanje nivoa klasa i redosleda kolona verovatnoća
+rf_pred  <- factor(rf_pred,  levels = levels(test_data$Fault_Type))
+log_pred <- factor(log_pred, levels = levels(test_data$Fault_Type))
+nn_pred  <- factor(nn_pred,  levels = levels(test_data$Fault_Type))
+
+rf_prob  <- rf_prob[,  levels(test_data$Fault_Type)]
+log_prob <- log_prob[, levels(test_data$Fault_Type)]
+nn_prob  <- nn_prob[,  levels(test_data$Fault_Type)]
+
+# 6.2 Confusion Matrix i osnovne metrike za Random Forest
+cat("\n--- Random Forest - Confusion Matrix ---\n")
+rf_cm <- confusionMatrix(data = rf_pred, reference = test_data$Fault_Type)
+print(rf_cm)
+cat("\n--- Random Forest - Confusion Matrix (procenti po stvarnoj klasi) ---\n")
+rf_cm_prop <- prop.table(rf_cm$table, 1) * 100
+print(round(rf_cm_prop, 1))
+
+# Detaljne metrike po klasama za RF
+cat("\n--- Random Forest - Detaljne metrike po klasama ---\n")
+rf_metrics <- rf_cm$byClass[, c("Sensitivity", "Specificity", "Precision", "Recall", "F1")]
+print(round(rf_metrics, 4))
+
+cat("\n--- Random Forest - Balanced Accuracy i Macro-F1 ---\n")
+rf_bal_acc <- mean(rf_cm$byClass[, "Balanced Accuracy"], na.rm = TRUE)
+rf_macro_f1 <- mean(rf_cm$byClass[, "F1"], na.rm = TRUE)
+
+cat(sprintf("Random Forest Balanced Accuracy: %.4f\n", rf_bal_acc))
+cat(sprintf("Random Forest Macro-F1: %.4f\n", rf_macro_f1))
+
+# 6.3 Confusion Matrix i metrike za Logističku regresiju
+cat("\n--- Multinomijalna logistička regresija - Confusion Matrix ---\n")
+log_cm <- confusionMatrix(data = log_pred, reference = test_data$Fault_Type)
+print(log_cm)
+cat("\n--- Logistička regresija - Confusion Matrix (procenti po stvarnoj klasi) ---\n")
+log_cm_prop <- prop.table(log_cm$table, 1) * 100
+print(round(log_cm_prop, 1))
+
+# Detaljne metrike po klasama za Logističku regresiju
+cat("\n--- Multinomijalna logistička regresija - Detaljne metrike po klasama ---\n")
+log_metrics <- log_cm$byClass[, c("Sensitivity", "Specificity", "Precision", "Recall", "F1")]
+print(round(log_metrics, 4))
+
+cat("\n--- Logistička regresija - Balanced Accuracy i Macro-F1 ---\n")
+log_bal_acc <- mean(log_cm$byClass[, "Balanced Accuracy"], na.rm = TRUE)
+log_macro_f1 <- mean(log_cm$byClass[, "F1"], na.rm = TRUE)
+
+cat(sprintf("Logistic Regression Balanced Accuracy: %.4f\n", log_bal_acc))
+cat(sprintf("Logistic Regression Macro-F1: %.4f\n", log_macro_f1))
+
+# 6.X Confusion Matrix i metrike za Neural Network
+cat("\n--- Neural Network - Confusion Matrix ---\n")
+nn_cm <- confusionMatrix(data = nn_pred, reference = test_data$Fault_Type)
+print(nn_cm)
+
+cat("\n--- Neural Network - Confusion Matrix (procenti po stvarnoj klasi) ---\n")
+nn_cm_prop <- prop.table(nn_cm$table, 1) * 100
+print(round(nn_cm_prop, 1))
+
+cat("\n--- Neural Network - Detaljne metrike po klasama ---\n")
+nn_metrics <- nn_cm$byClass[, c("Sensitivity", "Specificity", "Precision", "Recall", "F1")]
+print(round(nn_metrics, 4))
+
+cat("\n--- Neural Network - Balanced Accuracy i Macro-F1 ---\n")
+nn_bal_acc <- mean(nn_cm$byClass[, "Balanced Accuracy"], na.rm = TRUE)
+nn_macro_f1 <- mean(nn_cm$byClass[, "F1"], na.rm = TRUE)
+
+cat(sprintf("NN Balanced Accuracy: %.4f\n", nn_bal_acc))
+cat(sprintf("NN Macro-F1: %.4f\n", nn_macro_f1))
+
+# 6.4 Poređenje modela (Accuracy, Balanced Acc, Macro-F1)
+cat("\n--- Poređenje modela (Accuracy, Balanced Acc, Macro-F1) ---\n")
+
+rf_acc <- rf_cm$overall['Accuracy']
+log_acc <- log_cm$overall['Accuracy']
+
+cat(sprintf("RF  Accuracy: %.4f | BalAcc: %.4f | Macro-F1: %.4f\n", rf_acc, rf_bal_acc, rf_macro_f1))
+cat(sprintf("LOG Accuracy: %.4f | BalAcc: %.4f | Macro-F1: %.4f\n", log_acc, log_bal_acc, log_macro_f1))
+
+if (rf_macro_f1 > log_macro_f1) {
+  cat(sprintf("\nNajbolji model po Macro-F1: Random Forest (razlika: %.4f)\n", rf_macro_f1 - log_macro_f1))
+} else {
+  cat(sprintf("\nNajbolji model po Macro-F1: Multinomijalna logistička regresija (razlika: %.4f)\n", log_macro_f1 - rf_macro_f1))
+}
+# 6.5 ROC i AUC analiza za Random Forest
+cat("\n--- ROC i AUC analiza (Random Forest) ---\n")
+roc_multi <- multiclass.roc(test_data$Fault_Type, rf_prob)
+cat(sprintf("Multi-class AUC: %.4f\n", auc(roc_multi)))
+
+cat("\n--- ROC i AUC analiza (Logistička regresija) ---\n")
+roc_multi_log <- multiclass.roc(test_data$Fault_Type, log_prob)
+cat(sprintf("Multi-class AUC (LOG): %.4f\n", auc(roc_multi_log)))
+
+cat("\n--- ROC i AUC analiza (Neural Network) ---\n")
+roc_multi_nn <- multiclass.roc(test_data$Fault_Type, nn_prob)
+cat(sprintf("Multi-class AUC (NN): %.4f\n", auc(roc_multi_nn)))
+
+# Vizuelizacija ROC krivih za svaku klasu
+cat("\n--- ROC krive po klasama (Random Forest) ---\n")
+
+classes <- levels(test_data$Fault_Type)
+
+rf_rocs <- lapply(classes, function(cls) {
+  roc(
+    response  = as.numeric(test_data$Fault_Type == cls),
+    predictor = rf_prob[, cls],
+    quiet = TRUE
+  )
+})
+
+plot(rf_rocs[[1]],
+     main = "ROC krive po klasama (Random Forest)",
+     col = 1, lwd = 2)
+
+if (length(classes) > 1) {
+  for (i in 2:length(classes)) lines(rf_rocs[[i]], col = i, lwd = 2)
+}
+
+legend("bottomright", legend = classes, col = 1:length(classes), lwd = 2)
+
+# 6.6 Važnost atributa (Random Forest)
+cat("\n--- Važnost atributa (Random Forest) ---\n")
+varImpPlot(rf_model, main = "Važnost atributa - Random Forest",
+           type = 1, n.var = min(20, length(feature_cols)))
+
+# Prikaz top 15 najvažnijih atributa
+importance_df <- data.frame(
+  Feature = rownames(rf_model$importance),
+  Importance = rf_model$importance[, "MeanDecreaseAccuracy"]
+) %>%
+  arrange(desc(Importance)) %>%
+  head(15)
+
+cat("\nTop 15 najvažnijih atributa:\n")
+print(importance_df)
+
+# Vizuelizacija top atributa
+plot_importance <- ggplot(importance_df, aes(x = reorder(Feature, Importance), y = Importance)) +
+  geom_col(fill = "steelblue", alpha = 0.8) +
+  coord_flip() +
+  labs(title = "Top 15 najvažnijih atributa (Random Forest)",
+       x = "Atribut",
+       y = "Važnost (Mean Decrease Accuracy)") +
+  theme_grid_readable()
+save_and_print(plot_importance, "NajvaznijiAtributi.png", 16, 10)
+
+# ----------------------------------------------------------------------------
+# SEKCIJA 7: SAČUVANJE MODELA I REZULTATA
+# ----------------------------------------------------------------------------
+cat("\n", paste0(rep("=", 80), collapse = ""), "\n")
+cat("SAČUVANJE MODELA I REZULTATA\n")
+cat(paste0(rep("=", 80), collapse = ""), "\n")
+
+# Kreiranje direktorijuma za rezultate (ako ne postoji)
+if (!dir.exists("models")) dir.create("models")
+if (!dir.exists("results")) dir.create("results")
+
+# Čuvanje modela
+cat("\n--- Čuvanje modela ---\n")
+saveRDS(rf_model, "models/rf_model.rds")
+saveRDS(log_model, "models/logistic_model.rds")
+saveRDS(nn_model, "models/nn_model.rds")
+saveRDS(preProc, "models/preprocessor.rds")
+cat("Modeli sačuvani u 'models/' direktorijumu\n")
+
+# Čuvanje rezultata evaluacije
+cat("\n--- Čuvanje rezultata ---\n")
+results_summary <- list(
+  RandomForest = list(
+    Accuracy = rf_acc,
+    BalancedAccuracy = rf_bal_acc,
+    MacroF1 = rf_macro_f1,
+    ConfusionMatrix = rf_cm$table,
+    ConfusionMatrixPercent = rf_cm_prop,
+    Metrics = rf_metrics,
+    AUC = as.numeric(auc(roc_multi))
+  ),
+  LogisticRegression = list(
+    Accuracy = log_acc,
+    BalancedAccuracy = log_bal_acc,
+    MacroF1 = log_macro_f1,
+    ConfusionMatrix = log_cm$table,
+    ConfusionMatrixPercent = log_cm_prop,
+    Metrics = log_metrics,
+    AUC = as.numeric(auc(roc_multi_log))
+  ),
+  NeuralNetwork = list(
+    Accuracy = nn_cm$overall['Accuracy'],
+    BalancedAccuracy = nn_bal_acc,
+    MacroF1 = nn_macro_f1,
+    ConfusionMatrix = nn_cm$table,
+    ConfusionMatrixPercent = nn_cm_prop,
+    Metrics = nn_metrics,
+    AUC = as.numeric(auc(roc_multi_nn)),
+    BestTune = nn_model$bestTune
+  ),
+  FeatureImportance = importance_df
+)
+saveRDS(results_summary, "results/evaluation_results.rds")
+cat("Rezultati sačuvani u 'results/evaluation_results.rds'\n")
+
+# Kreiranje tekstualnog izveštaja
+cat("\n--- Kreiranje tekstualnog izveštaja ---\n")
+sink("results/model_evaluation_report.txt")
+
+cat(paste0(rep("=", 80), collapse = ""), "\n")
+cat("IZVEŠTAJ O EVALUACIJI MODELA\n")
+cat(paste0(rep("=", 80), collapse = ""), "\n\n")
+
+cat(sprintf("Datum: %s\n", Sys.Date()))
+cat(sprintf("Broj feature-a: %d\n", length(feature_cols)))
+cat(sprintf("Broj klasa: %d\n\n", nlevels(test_data$Fault_Type)))
+
+cat("--- Random Forest ---\n")
+cat(sprintf("Accuracy: %.4f\n", rf_acc))
+cat(sprintf("Balanced Accuracy: %.4f\n", rf_bal_acc))
+cat(sprintf("Macro-F1: %.4f\n", rf_macro_f1))
+cat(sprintf("Multi-class AUC: %.4f\n\n", as.numeric(auc(roc_multi))))
+
+cat("--- Multinomijalna logistička regresija ---\n")
+cat(sprintf("Accuracy: %.4f\n", log_acc))
+cat(sprintf("Balanced Accuracy: %.4f\n", log_bal_acc))
+cat(sprintf("Macro-F1: %.4f\n", log_macro_f1))
+cat(sprintf("Multi-class AUC: %.4f\n\n", as.numeric(auc(roc_multi_log))))
+
+cat("--- Neural Network (MLP) ---\n")
+cat(sprintf("Accuracy: %.4f\n", nn_cm$overall['Accuracy']))
+cat(sprintf("Balanced Accuracy: %.4f\n", nn_bal_acc))
+cat(sprintf("Macro-F1: %.4f\n", nn_macro_f1))
+cat(sprintf("Multi-class AUC: %.4f\n\n", as.numeric(auc(roc_multi_nn))))
+print(nn_model$bestTune)
+cat("\n")
+
+cat("--- Top 10 atributa (Random Forest) ---\n")
+print(head(importance_df, 10))
+
+sink()
+
+cat("Tekstualni izveštaj sačuvan u 'results/model_evaluation_report.txt'\n")
+
+# ----------------------------------------------------------------------------
+# ZAKLJUČAK
+# ----------------------------------------------------------------------------
+cat("\n", paste0(rep("=", 80), collapse = ""), "\n")
+cat("ANALIZA ZAVRŠENA USPEŠNO!\n")
+cat(paste0(rep("=", 80), collapse = ""), "\n")
+cat("\nSačuvano:\n")
+cat("  - Modeli: models/rf_model.rds, models/logistic_model.rds\n")
+cat("  - Preprocessor: models/preprocessor.rds\n")
+cat("  - Rezultati: results/evaluation_results.rds\n")
+cat("  - Izveštaj: results/model_evaluation_report.txt\n")
+cat("\n")

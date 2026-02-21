@@ -2,31 +2,40 @@
 IZVEŠTAJ O EVALUACIJI MODELA
 ================================================================================ 
 
-Datum: 2026-01-12
-Broj feature-a: 42
+Datum: 2026-02-21
+Broj feature-a: 25
 Broj klasa: 4
 
 --- Random Forest ---
-Accuracy: 0.6633
-Balanced Accuracy: 0.4945
-Macro-F1: 0.4309
-Multi-class AUC: 0.5466
+Accuracy: 0.6030
+Balanced Accuracy: 0.4770
+Macro-F1: 0.4184
+Multi-class AUC: 0.5098
 
 --- Multinomijalna logistička regresija ---
-Accuracy: 0.4523
-Balanced Accuracy: 0.5107
-Macro-F1: 0.4017
-Multi-class AUC: 0.5307
+Accuracy: 0.2261
+Balanced Accuracy: 0.4919
+Macro-F1: 0.1818
+Multi-class AUC: 0.5131
+
+--- Neural Network (MLP) ---
+Accuracy: 0.3166
+Balanced Accuracy: 0.4950
+Macro-F1: 0.2033
+Multi-class AUC: 0.4945
+
+  size decay
+9    7  0.01
 
 --- Top 10 atributa (Random Forest) ---
-              Feature Importance
-FFT_Pres_1 FFT_Pres_1 0.04219181
-FFT_Pres_9 FFT_Pres_9 0.04194609
-FFT_Vib_5   FFT_Vib_5 0.03048520
-FFT_Vib_7   FFT_Vib_7 0.02725476
-FFT_Vib_3   FFT_Vib_3 0.02724614
-FFT_Temp_1 FFT_Temp_1 0.02719524
-FFT_Temp_5 FFT_Temp_5 0.02501168
-FFT_Temp_3 FFT_Temp_3 0.02285078
-FFT_Temp_9 FFT_Temp_9 0.02282956
-FFT_Temp_7 FFT_Temp_7 0.02162576
+                                    Feature Importance
+FFT_Pres_0                       FFT_Pres_0 0.09487052
+FFT_Vib_2                         FFT_Vib_2 0.09330919
+FFT_Vib_7                         FFT_Vib_7 0.07607675
+FFT_Temp_8                       FFT_Temp_8 0.06314732
+Min_Sensor                       Min_Sensor 0.06294226
+Pressure                           Pressure 0.06112985
+FFT_Pres_5                       FFT_Pres_5 0.05949636
+FFT_Pres_8                       FFT_Pres_8 0.05925976
+FFT_Pres_9                       FFT_Pres_9 0.05568175
+Ratio_Current_Voltage Ratio_Current_Voltage 0.05189854
