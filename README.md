@@ -232,7 +232,7 @@ Ovo potvrđuje da **kombinacija frekventnih i osnovnih merenja**, uz odgovaraju�
 ### Autori
 
 - **Aleksandar Mladenović** – 68/2022
-- **Đorđe Rajčić** – 841/2022 
+- **Đorđe Rajčić** – 84/2022 
 
 - **Fakultet**: Prirodno-matematički fakultet, Kragujevac 
 - **Predmet**: Uvod u nauku o podacima  
