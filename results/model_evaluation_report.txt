@@ -2,40 +2,49 @@
 IZVEŠTAJ O EVALUACIJI MODELA
 ================================================================================ 
 
-Datum: 2026-02-21
+Datum: 2026-03-01
 Broj feature-a: 25
 Broj klasa: 4
 
 --- Random Forest ---
-Accuracy: 0.6030
-Balanced Accuracy: 0.4770
-Macro-F1: 0.4184
-Multi-class AUC: 0.5098
+Accuracy: 0.6985
+Balanced Accuracy: 0.5000
+Macro-F1: 0.2298
+Multi-class AUC: 0.5267
 
 --- Multinomijalna logistička regresija ---
-Accuracy: 0.2261
-Balanced Accuracy: 0.4919
-Macro-F1: 0.1818
-Multi-class AUC: 0.5131
+Accuracy: 0.4573
+Balanced Accuracy: 0.4759
+Macro-F1: 0.2249
+Multi-class AUC: 0.5128
 
 --- Neural Network (MLP) ---
-Accuracy: 0.3166
-Balanced Accuracy: 0.4950
-Macro-F1: 0.2033
-Multi-class AUC: 0.4945
+Accuracy: 0.4020
+Balanced Accuracy: 0.4860
+Macro-F1: 0.2334
+Multi-class AUC: 0.4910
 
   size decay
-9    7  0.01
+6    7  0.01
+
+--- XGBoost ---
+Accuracy: 0.6181
+Balanced Accuracy: 0.4817
+Macro-F1: 0.2115
+Multi-class AUC: 0.5262
+
+  nrounds max_depth eta gamma colsample_bytree min_child_weight subsample
+8     100         6 0.3     0              0.8                1       0.8
 
 --- Top 10 atributa (Random Forest) ---
-                                    Feature Importance
-FFT_Pres_0                       FFT_Pres_0 0.09487052
-FFT_Vib_2                         FFT_Vib_2 0.09330919
-FFT_Vib_7                         FFT_Vib_7 0.07607675
-FFT_Temp_8                       FFT_Temp_8 0.06314732
-Min_Sensor                       Min_Sensor 0.06294226
-Pressure                           Pressure 0.06112985
-FFT_Pres_5                       FFT_Pres_5 0.05949636
-FFT_Pres_8                       FFT_Pres_8 0.05925976
-FFT_Pres_9                       FFT_Pres_9 0.05568175
-Ratio_Current_Voltage Ratio_Current_Voltage 0.05189854
+      Feature Importance
+1   FFT_Vib_7  100.00000
+2   FFT_Vib_2   91.08908
+3  FFT_Pres_0   90.26177
+4    Pressure   74.07893
+5  FFT_Pres_5   56.34396
+6  Min_Sensor   46.74161
+7  FFT_Temp_9   45.97386
+8  FFT_Pres_6   42.28877
+9  FFT_Pres_9   40.96181
+10    Voltage   38.04699
