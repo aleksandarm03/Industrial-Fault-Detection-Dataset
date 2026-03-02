@@ -145,7 +145,7 @@ Na ovaj način modelima je omogućen bolji uvid u manjinske klase kvarova, što 
 
 ### Modelovanje
 
-Na balansiranom i preprocesiranom trening skupu izgrađena su tri glavna modela:
+Na balansiranom i preprocesiranom trening skupu izgrađena su četiri glavna modela:
 
 - **Random Forest** (`ranger` / `randomForest`):  
   - treniran sa oko 200 stabala (`ntree = 200`),  
@@ -163,6 +163,12 @@ Na balansiranom i preprocesiranom trening skupu izgrađena su tri glavna modela:
     - `size ∈ {3, 5, 7}` (broj neurona u skrivenom sloju)  
     - `decay ∈ {0, 0.001, 0.01}` (regularizacija).  
 
+- **XGBoost** (`xgboost`):  
+  - gradient boosting model,  
+  - korišćen je `caret::train` sa **cross-validation**,  
+  - ispitivane vrednosti hiperparametara:  
+    - `nrounds`, `max_depth`, `eta`, `gamma`, `colsample_bytree`, `min_child_weight`, `subsample`.  
+
 Svi modeli su evaluirani na nezavisnom test skupu, bez SMOTE-a (realna raspodela klasa).  
 
 ---
@@ -173,12 +179,15 @@ Na osnovu fajla `results/model_evaluation_report.txt` dobijeni su sledeći klju�
 
 | Model                             | Accuracy | Balanced Accuracy | Macro‑F1 | Multi‑class AUC |
 |-----------------------------------|---------:|------------------:|---------:|----------------:|
-| Random Forest                     | 0.6030   | 0.4770            | 0.4184   | 0.5098          |
-| Multinomijalna logistička regresija | 0.2261 | 0.4919            | 0.1818   | 0.5131          |
-| Neural Network (MLP)             | 0.3166   | 0.4950            | 0.2033   | 0.4945          |
+| Random Forest                     | 0.6985   | 0.5000            | 0.2298   | 0.5267          |
+| XGBoost                           | 0.6181   | 0.4817            | 0.2115   | 0.5262          |
+| Multinomijalna logistička regresija | 0.4573 | 0.4759            | 0.2249   | 0.5128          |
+| Neural Network (MLP)             | 0.4020   | 0.4860            | 0.2334   | 0.4945          |
 
-- **Random Forest** postiže **najbolju tačnost i Macro-F1**, što ga čini najkorisnijim modelom sa praktičnog aspekta, uprkos tome što Balanced Accuracy i AUC nisu mnogo viši od ostalih modela.  
-- Logistička regresija i MLP pokazuju solidnu ujednačenost po klasama (Balanced Accuracy), ali znatno lošije Macro-F1 vrednosti.  
+- **Random Forest** postiže **najbolju tačnost (69.85%) i Balanced Accuracy (50.00%)**, što ga čini najkorisnijim modelom sa praktičnog aspekta.  
+- **XGBoost** pokazuje dobru tačnost (61.81%) i drugi je po performansama.  
+- **Neural Network (MLP)** ima najbolji Macro-F1 (0.2334) među svim modelima, što ukazuje na bolju ravnotežu u predikcijama među klasama.  
+- Svi modeli pokazuju umerene performanse, što ukazuje na izazovnost problema klasifikacije industrijskih kvarova.  
 
 #### Važnost atributa (Random Forest)
 
@@ -199,6 +208,7 @@ Ovo potvrđuje da **kombinacija frekventnih i osnovnih merenja**, uz odgovaraju�
 - **`dataset/Industrial_fault_detection.csv`** – izvorni skup podataka.  
 - **`models/`** – sačuvani modeli u RDS formatu:  
   - `rf_model.rds` – Random Forest model,  
+  - `xgb_model.rds` – XGBoost model,  
   - `logistic_model.rds` – multinomijalna logistička regresija,  
   - `nn_model.rds` – neuralna mreža (MLP),  
   - `preprocessor.rds` – recipe/preprocessing pipeline.  
@@ -223,7 +233,9 @@ Ovo potvrđuje da **kombinacija frekventnih i osnovnih merenja**, uz odgovaraju�
 ### Zaključak
 
 - Projekat pokazuje da je moguće **razlikovati više tipova industrijskih kvarova** kombinovanjem osnovnih senzorskih merenja i FFT osobina.  
-- **Random Forest** se izdvojio kao **najstabilniji i najtačniji model** po pitanju ukupne tačnosti i Macro‑F1, uz jasnu interpretabilnost preko važnosti atributa.  
+- **Random Forest** se izdvojio kao **najstabilniji i najtačniji model** sa tačnošću od 69.85% i Balanced Accuracy od 50%, uz jasnu interpretabilnost preko važnosti atributa.  
+- **XGBoost** takođe pokazuje dobre rezultate (61.81% tačnost) i potvrđuje efikasnost ensemble metoda.  
+- **Neural Network (MLP)** ima najbolji Macro-F1 skor (0.2334), što ukazuje na najbolju ravnotežu predikcija među klasama.  
 - FFT osobine pritiska i vibracija, zajedno sa pažljivo dizajniranim izvedenim osobinama, imaju ključni doprinos u detekciji kvarova.  
 - Primena **SMOTE-a** i odgovarajućih metrika za neuravnotežene klase neophodna je kako bi se performanse modela realno procenile na svim klasama, a ne samo na dominantnim.  
 
